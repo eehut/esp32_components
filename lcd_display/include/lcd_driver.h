@@ -17,37 +17,7 @@
  extern "C" {
  #endif
 
- #include "esp_types.h"
- #include "driver/i2c_master.h"
- #include "driver/gpio.h"
- #include "bus_manager.h"
-
-
-/**
- * @brief I2C驱动总线接口
- * 
- */
-typedef struct 
-{
-    i2c_bus_t bus;       // 总线ID
-    uint16_t address;      // 设备地址
-}lcd_i2c_data_t;
-
-
-/**
- * @brief SPI驱动总线接口
- * 
- */
-typedef struct 
-{
-    int16_t sda;
-    int16_t scl;
-    int16_t dc;
-    int16_t rst;
-    int16_t cs;
-}lcd_spi_data_t;
-
-
+#include "esp_types.h"
 /**
  * @brief LCD驱动操作接口
  * 
@@ -118,54 +88,12 @@ static inline void lcd_ops_dummy(const void *drv)
     // DO NOTHING
 }
 
-/// I2C 初始化
-extern void lcd_ops_i2c_init(const void *drv);
-/// I2C写
-extern void lcd_ops_i2c_write_command(const void *drv, const uint8_t *data, uint16_t size);
-/// I2C写数据
-extern void lcd_ops_i2c_write_dram_data(const void *drv, const uint8_t *data, uint16_t size);
-
-
-/// SPI 初始化
-extern void lcd_ops_gpio_spi_init(const void *drv);
-/// SPI写
-extern void lcd_ops_gpio_spi_write_command(const void *drv, const uint8_t *data, uint16_t size);
-/// SPI写数据
-extern void lcd_ops_gpio_spi_write_dram_data(const void *drv, const uint8_t *data, uint16_t size);
-/// SPI 复位
-extern void lcd_ops_gpio_spi_reset(const void *drv);
-
-
-/// 声明一个I2C的驱动 
-#define LCD_DEFINE_DRIVER_I2C(_name, _bus, _addr) \
-static const lcd_i2c_data_t s_lcd_data_##_name = {.bus = _bus, .address = _addr}; \
-static const lcd_driver_ops_t s_lcd_driver_##_name = \
-{ \
-    .data = &s_lcd_data_##_name, \
-    .init = lcd_ops_i2c_init, \
-    .write_command = lcd_ops_i2c_write_command, \
-    .write_dram_data = lcd_ops_i2c_write_dram_data, \
-    .reset = lcd_ops_dummy \
-}
-
-///声明一个SPI的OLED驱动 
-#define LCD_DEFINE_DRIVER_GPIO_SPI(_name, _data, _clk, _dc, _rst, _cs) \
-static const lcd_spi_data_t s_lcd_data_##_name = {_data, _clk, _dc, _rst, _cs}; \
-static const lcd_driver_ops_t s_lcd_driver_##_name = \
-{ \
-    .data = &s_lcd_data_##_name, \
-    .init = lcd_ops_gpio_spi_init, \
-    .write_command = lcd_ops_gpio_spi_write_command, \
-    .write_dram_data = lcd_ops_gpio_spi_write_dram_data, \
-    .reset = lcd_ops_gpio_spi_reset \
-}
-
 /// 引用一个驱动 
 #define LCD_DRIVER(_name) &s_lcd_driver_##_name
 
 
- #ifdef __cplusplus
- }
- #endif
+#ifdef __cplusplus
+}
+#endif
 
 #endif // __LCD_DRIVER_H__
