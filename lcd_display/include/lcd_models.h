@@ -1,18 +1,64 @@
 #ifndef __LCD_MODELS_H__
 #define __LCD_MODELS_H__
 
+#include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #include "lcd_model_type.h"
 
+static inline void _set_page_address_ssd1306(const void *disp, const uint16_t page, uint16_t offset)
+{
+    uint8_t cmd[3] = {0xb0 + page, offset & 0x0f, 0x10 + (offset >> 4)};
+    lcd_write_commands(disp, cmd, 3);
+}
 
-// 预定义的MODEL
-#define LCD_SSD1306_128X64 1
-#define LCD_SH1108_160X128 2
-#define LCD_SSD1312_128X64 3
-#define LCD_SH1122_256X64 4
+static inline void _set_page_address_sh1108(const void *disp, const uint16_t page, uint16_t offset)
+{
+    uint8_t cmd[4] = {0xb0,  page, offset & 0x0f, 0x11 + (offset >> 4)};
+    lcd_write_commands(disp, cmd, 4);
+}
+
+static inline void _set_page_address_sh1122(const void *disp, const uint16_t page, uint16_t offset)
+{
+    uint8_t cmd[4] = {0xb0 , page, offset & 0x0f, 0x10 + (offset >> 4)};
+    lcd_write_commands(disp, cmd, 4);
+}
+
+static inline void _custom_refresh_for_sh1122(const void *disp, const lcd_model_t *model)
+{
+    int x_num = (model->xsize + 7) / 8;
+    int y_num = model->ysize;
+
+    // 从MCU搬动显示数据到LCD的内部DRAM中，这个方式是固定的，跟具体怎么旋转无关。
+    // 显示方向旋转只是改变读取数据的方式，而不是改变搬动数据的方式。
+    model->set_page_address(disp, 0, 0);
+
+    uint8_t buffer[128]; // 256 /2
+
+    for (int y = 0; y < y_num; y ++)
+    {
+        // 设置页地址
+        //model->set_page_address(disp, y, 0);
+        // 读取数据, SH1122是带灰度的屏，每个字节对应两个位，需要进行转换
+        uint16_t index = 0;
+        for (int x = 0; x < x_num; x ++)
+        {
+            uint8_t data = lcd_get_dram_data(disp, x, y);
+            for (int i = 0; i < 4; i ++)
+            {
+                buffer[index] = (data & 0x01) ? 0xf0 : 0x00;
+                data >>= 1;
+                buffer[index] |= (data & 0x01) ? 0x0f : 0x00;
+                data >>= 1;
+                index++;
+            }
+        }
+        lcd_write_datas(disp, buffer, sizeof(buffer));
+    }
+    
+}
 
 /*
     FOR SSD1306
@@ -54,7 +100,8 @@ extern "C" {
 
 /// 预定义的MODEL
 #define LCD_DEFINE_SSD1306_128X64(_name) \
-LCD_MODEL_DEFINE(LCD_SSD1306_128X64, _name, 128, 64, SSD1306_INIT_DATAS)
+LCD_MODEL_DEFINE(LCD_SSD1306_128X64, _name, 128, 64, SSD1306_INIT_DATAS, LCD_DRAM_MODE_VERTICAL, _set_page_address_ssd1306)
+
 
 /*
     FOR SSD1312
@@ -110,7 +157,7 @@ LCD_MODEL_DEFINE(LCD_SSD1306_128X64, _name, 128, 64, SSD1306_INIT_DATAS)
 
 /// 预定义的MODEL
 #define LCD_DEFINE_SSD1312_128X64(_name) \
-LCD_MODEL_DEFINE(LCD_SSD1312_128X64, _name, 128, 64, SSD1312_INIT_DATAS)
+LCD_MODEL_DEFINE(_name, 128, 64, SSD1312_INIT_DATAS, LCD_DRAM_MODE_VERTICAL, _set_page_address_ssd1306)
 
 /*
     FOR SH1108 (160x160 OLED)
@@ -170,7 +217,7 @@ LCD_MODEL_DEFINE(LCD_SSD1312_128X64, _name, 128, 64, SSD1312_INIT_DATAS)
 
 
 #define LCD_DEFINE_SH1108_160X128(_name) \
-LCD_MODEL_DEFINE(LCD_SH1108_160X128, _name, 128, 160, SH1108_INIT_DATAS)
+LCD_MODEL_DEFINE(LCD_SH1108_160X128, _name, 128, 160, SH1108_INIT_DATAS, LCD_DRAM_MODE_VERTICAL, _set_page_address_sh1108)
 
 
 /*
@@ -208,7 +255,7 @@ LCD_MODEL_DEFINE(LCD_SH1108_160X128, _name, 128, 160, SH1108_INIT_DATAS)
 }
 
 #define LCD_DEFINE_SH1122_256X64(_name) \
-LCD_MODEL_DEFINE(LCD_SH1122_256X64, _name, 256, 64, SH1122_INIT_DATAS)
+LCD_MODEL_DEFINE_WITH_CUSTOM_REFRESH(_name, 256, 64, SH1122_INIT_DATAS, LCD_DRAM_MODE_DEFAULT, _set_page_address_sh1122, _custom_refresh_for_sh1122)
 
 
 #ifdef __cplusplus

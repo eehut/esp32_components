@@ -57,7 +57,7 @@ void lcd_ops_gpio_spi_init(const void *drv)
 
 
 /// SPI写
-static void lcd_ops_gpio_spi_write(const lcd_gpio_spi_data_t *spi, bool cmd, uint8_t data)
+static inline void lcd_ops_gpio_spi_write(const lcd_gpio_spi_data_t *spi, bool cmd, uint8_t data)
 {
     // 决定写的是命令还是数据 
     gpio_set_level(spi->dc, cmd ? 0 : 1);
