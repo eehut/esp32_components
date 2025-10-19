@@ -27,15 +27,15 @@ extern "C" {
 #endif 
 
 #ifndef CONFIG_LCD_FONT_ASCII_10X18
-#define CONFIG_LCD_FONT_ASCII_10X18 1
+#define CONFIG_LCD_FONT_ASCII_10X18 0
 #endif
 
 #ifndef CONFIG_LCD_FONT_SUN_ASCII_12X22
-#define CONFIG_LCD_FONT_SUN_ASCII_12X22 1
+#define CONFIG_LCD_FONT_SUN_ASCII_12X22 0
 #endif
 
 #ifndef CONFIG_LCD_FONT_TER_ASCII_16X32
-#define CONFIG_LCD_FONT_TER_ASCII_16X32 1
+#define CONFIG_LCD_FONT_TER_ASCII_16X32 0
 #endif
 
 /// 默认启用Acorn8x8字体
@@ -50,7 +50,7 @@ extern "C" {
 
 /// 默认不启用HZK字体16
 #ifndef CONFIG_LCD_FONT_HZK_16
-#define CONFIG_LCD_FONT_HZK_16 1
+#define CONFIG_LCD_FONT_HZK_16 0
 #endif
 
 /// 默认不启用HZK字体16

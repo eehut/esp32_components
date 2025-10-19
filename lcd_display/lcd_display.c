@@ -17,6 +17,7 @@
 #include "lcd_model_type.h"
 #include "uptime.h"
 #include <stdint.h>
+#include <stdbool.h>
 
 static const char *TAG = "lcd-mono";
 
@@ -57,6 +58,10 @@ typedef struct
     uint8_t *dram;
     /// 指赂数据获取方式
     uint8_t(*dram_get_data)(const void *disp, uint16_t, uint16_t);
+    /// 指向默认ASCII字体
+    const lcd_font_t *default_ascii_font;
+    /// 指向默认UNICDOE字体
+    const lcd_font_t *default_unicode_font;
 }lcd_display_t;
 
 
@@ -585,13 +590,100 @@ static inline void _set_dram_bits(const lcd_display_t *disp, int x, int y, uint8
 
 
 /**
+ * @brief 设置默认字体
+ * 
+ * @param disp 
+ * @param ascii_font 
+ * @param unicode_font 
+ */
+void lcd_set_default_fonts(lcd_handle_t disp, const lcd_font_t *ascii_font, const lcd_font_t *unicode_font)
+{
+    lcd_display_t *lcd = (lcd_display_t *)disp;
+    lcd->default_ascii_font = ascii_font;
+    lcd->default_unicode_font = unicode_font;
+}
+
+/**
+ * @brief 解析UTF-8字符并返回Unicode码点
+ * 
+ * @param utf8_str UTF-8编码的字符串指针
+ * @param unicode 输出Unicode码点
+ * @return int 返回消耗的字节数，0表示解析失败
+ */
+static int parse_utf8_char(const char *utf8_str, uint32_t *unicode)
+{
+    if (!utf8_str || !unicode) {
+        return 0;
+    }
+    
+    unsigned char first_byte = (unsigned char)utf8_str[0];
+    
+    // ASCII字符 (0-127)
+    if (first_byte < 0x80) {
+        *unicode = first_byte;
+        return 1;
+    }
+    
+    // 多字节UTF-8字符
+    int bytes = 0;
+    if ((first_byte & 0xE0) == 0xC0) {
+        bytes = 2;  // 2字节UTF-8
+    } else if ((first_byte & 0xF0) == 0xE0) {
+        bytes = 3;  // 3字节UTF-8
+    } else if ((first_byte & 0xF8) == 0xF0) {
+        bytes = 4;  // 4字节UTF-8
+    } else {
+        // 无效的UTF-8起始字节
+        return 0;
+    }
+    
+    // 检查是否有足够的字节
+    for (int i = 1; i < bytes; i++) {
+        if ((utf8_str[i] & 0xC0) != 0x80) {
+            // 无效的UTF-8延续字节
+            return 0;
+        }
+    }
+    
+    // 提取Unicode码点
+    *unicode = 0;
+    if (bytes == 2) {
+        *unicode = ((first_byte & 0x1F) << 6) | (utf8_str[1] & 0x3F);
+    } else if (bytes == 3) {
+        *unicode = ((first_byte & 0x0F) << 12) | 
+                   ((utf8_str[1] & 0x3F) << 6) | 
+                   (utf8_str[2] & 0x3F);
+    } else if (bytes == 4) {
+        *unicode = ((first_byte & 0x07) << 18) | 
+                   ((utf8_str[1] & 0x3F) << 12) | 
+                   ((utf8_str[2] & 0x3F) << 6) | 
+                   (utf8_str[3] & 0x3F);
+    }
+    
+    return bytes;
+}
+
+/**
+ * @brief 判断字符是否为ASCII字符
+ * 
+ * @param unicode Unicode码点
+ * @return true 是ASCII字符
+ * @return false 不是ASCII字符
+ */
+static bool is_ascii_char(uint32_t unicode)
+{
+    return unicode < 0x80;
+}
+
+
+/**
  * @brief 查找字库并显示，较底层函数，支持部分显示。
  * 
  * @param disp disp handle
  * @param x 
  * @param y 
- * @param ch 
- * @param font 
+ * @param ch 字符，有可能是ASCII，也有可能是UNICODE
+ * @param font 字体，如果为NULL，使用默认字体
  * @param reverse 是否反向显示
  * @return int 返回实际显示的像素宽度
  */
@@ -691,19 +783,20 @@ int lcd_display_char(lcd_handle_t disp, int x, int y, int ch, const lcd_font_t *
  * @param x 显示位置X, 水平方向, 从左到右
  * @param y 显示位置Y, 垂直方向, 从上到下
  * @param text 需要显示的文本
- * @param font 字体
+ * @param ascii_font ASCII字体
+ * @param unicode_font UNICODE 字体
  * @param reverse 是否反向显示
  * 
  * @return int 返回显示的字符数量
  */
-int lcd_display_string(lcd_handle_t disp, int x, int y, const char *text, const lcd_font_t *font, bool reverse)
+int lcd_display_string(lcd_handle_t disp, int x, int y, const char *text, const lcd_font_t *ascii_font, const lcd_font_t *unicode_font, bool reverse)
 {
     lcd_display_t *lcd = (lcd_display_t *)disp;       
     const char *ch = text;     
     int count = 0;
     int current_x = x;
 
-    if (!text || !font)
+    if (!text)
     {
         return count;
     }
@@ -714,10 +807,35 @@ int lcd_display_string(lcd_handle_t disp, int x, int y, const char *text, const 
         return count;
     }
 
+    if (ascii_font == NULL) 
+    {
+        ascii_font = lcd->default_ascii_font;
+    }
+
+    if (unicode_font == NULL)
+    {
+        unicode_font = lcd->default_unicode_font;
+    }
+
     // 显示每个字符，即使只能部分显示
     while (*ch)
     {
-        int width = lcd_display_char(disp, current_x, y, *ch, font, reverse);
+        uint32_t unicode;
+        int bytes_consumed = parse_utf8_char(ch, &unicode);
+        
+        if (bytes_consumed == 0)
+        {
+            // UTF-8解析失败，跳过这个字符
+            ESP_LOGW(TAG, "Failed to parse UTF-8 character at position %d", (int)(ch - text));
+            ch++;
+            continue;
+        }
+        
+        // 选择字体
+        const lcd_font_t *font = is_ascii_char(unicode) ? ascii_font : unicode_font;
+
+        // 显示字符
+        int width = lcd_display_char(disp, current_x, y, unicode, font, reverse);
         if (width > 0)
         {
             count++;
@@ -727,7 +845,8 @@ int lcd_display_string(lcd_handle_t disp, int x, int y, const char *text, const 
         {
             break;
         }
-        ch++;
+        
+        ch += bytes_consumed;
     }
 
     return count;

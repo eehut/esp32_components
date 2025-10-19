@@ -79,6 +79,15 @@ void lcd_startup(lcd_handle_t disp);
 void lcd_fill(lcd_handle_t disp, uint8_t data);
 
 /**
+* @brief 设置默认字体
+* 
+* @param disp 
+* @param ascii_font 
+* @param unicode_font 
+*/
+void lcd_set_default_fonts(lcd_handle_t disp, const lcd_font_t *ascii_font, const lcd_font_t *unicode_font);
+
+/**
  * @brief 显示单个字符，支持部分显示
  * 
  * @param disp LCD显示句柄
@@ -98,12 +107,45 @@ int lcd_display_char(lcd_handle_t disp, int x, int y, int ch, const lcd_font_t *
  * @param x 显示位置X, 水平方向, 从左到右
  * @param y 显示位置Y, 垂直方向, 从上到下
  * @param text 需要显示的文本
- * @param font 字体
+ * @param ascii_font ASCII字体
+ * @param unicode_font UNICODE 字体
  * @param reverse 是否反向显示(黑底白字)
  * 
  * @return int 返回显示的字符数量
  */
-int lcd_display_string(lcd_handle_t disp, int x, int y, const char *text, const lcd_font_t *font, bool reverse);
+int lcd_display_string(lcd_handle_t disp, int x, int y, const char *text, const lcd_font_t *ascii_font, const lcd_font_t *unicode_font, bool reverse);
+
+
+/**
+ * @brief 显示一串文本，支持部分显示。如果字符超出显示区域，会显示能显示的部分
+ * 
+ * @param disp LCD显示句柄
+ * @param x 显示位置X, 水平方向, 从左到右
+ * @param y 显示位置Y, 垂直方向, 从上到下
+ * @param text 需要显示的文本
+ * @param reverse 是否反向显示(黑底白字)
+ * @return int 返回显示的字符数量
+ */
+static inline int lcd_display_text(lcd_handle_t disp, int x, int y, const char *text, bool reverse)
+{
+    return lcd_display_string(disp, x, y, text, NULL, NULL, reverse);
+}
+
+/**
+ * @brief 显示一串ASCII字符串，支持部分显示。如果字符超出显示区域，会显示能显示的部分
+ * 
+ * @param disp LCD显示句柄
+ * @param x 显示位置X, 水平方向, 从左到右
+ * @param y 显示位置Y, 垂直方向, 从上到下
+ * @param text 需要显示的文本
+ * @param font ASCII字体
+ * @param reverse 是否反向显示(黑底白字)
+ * @return int 返回显示的字符数量
+ */
+static inline int lcd_display_ascii_string(lcd_handle_t disp, int x, int y, const char *text, const lcd_font_t *font, bool reverse)
+{
+    return lcd_display_string(disp, x, y, text, font, NULL, reverse);
+}
 
 /**
  * @brief 显示单色位图，支持部分显示
