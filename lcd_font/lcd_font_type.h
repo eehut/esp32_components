@@ -109,6 +109,17 @@ const lcd_font_t g_lcd_font_##_name = { \
     .get_code_data = _func, \
 }
 
+
+#define LCD_FONT_DEFINE_NO_DATA(_name, _width, _height, _func) \
+const lcd_font_t g_lcd_font_##_name = { \
+    .name = #_name,  \
+    .width = _width, .height = _height, \
+    .code_size = ((((_width) >> 3) + (((_width) & 0x7) ? 1 : 0)) * (_height)), \
+    .data_size = 0, \
+    .data = NULL,  \
+    .get_code_data = _func, \
+}
+
 /**
  * @brief 声明一个字体
  * 
@@ -127,7 +138,6 @@ extern const lcd_font_t g_lcd_font_##_name
 
 /// 定义一个ASCII-数字only字体
 #define LCD_ASCII_NUMBER_FONT_DEFINE(_name, _width, _height) LCD_FONT_DEFINE(_name, _width, _height, lcd_font_get_ascii_number_code)
-
 
 #ifdef __cplusplus
 }

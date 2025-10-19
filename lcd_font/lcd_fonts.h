@@ -48,6 +48,16 @@ extern "C" {
 #define CONFIG_LCD_FONT_CONSOLE_NUMBER_32X48 0
 #endif
 
+/// 默认不启用HZK字体16
+#ifndef CONFIG_LCD_FONT_HZK_16
+#define CONFIG_LCD_FONT_HZK_16 1
+#endif
+
+/// 默认不启用HZK字体16
+#ifndef CONFIG_LCD_FONT_HZK_24
+#define CONFIG_LCD_FONT_HZK_24 0
+#endif
+
 
 /// ASCII字符 8*8
 LCD_FONT_DECLARE(ascii_8x8);
@@ -69,6 +79,19 @@ LCD_FONT_DECLARE(acorn_ascii_8x8);
 
 /// 大号的数字 32*48 
 LCD_FONT_DECLARE(console_number_32x48);
+
+/// HZK字体16*16
+LCD_FONT_DECLARE(hzk16);
+
+/// HZK字体24*24
+LCD_FONT_DECLARE(hzk24);
+
+/**
+ * @brief 初始化汉字库
+ * 
+ * @note 在系统启动时调用，加载并校验所有启用的汉字库分区
+ */
+void lcd_font_init(void);
 
 
 #ifdef __cplusplus
