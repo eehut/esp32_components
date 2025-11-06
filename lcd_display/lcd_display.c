@@ -505,6 +505,8 @@ void lcd_refresh(lcd_handle_t disp)
             for (int x = 0; x < x_num; x ++)
             {
                 data[x] = lcd->dram_get_data(disp, x, y);
+                // 测试数据, 你可以简单的解除注释，这样应用层的显示将无效，而是显示测试数据
+                //data[x] = 0x8e;
             }
             lcd_write_datas(disp, data, x_num);
         }

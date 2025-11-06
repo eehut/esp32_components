@@ -108,6 +108,34 @@ static const lcd_model_t s_lcd_model_##_name = { \
 extern uint8_t lcd_get_dram_data(const void *disp, uint16_t page_x_or_x, uint16_t page_y_or_y);
 
 
+
+/**
+ * @brief 设置SSD1306的页地址
+ * 
+ * @param disp 
+ * @param page 
+ * @param offset 
+ */
+static inline void lcd_set_page_address_ssd1306_compatible(const void *disp, const uint16_t page, uint16_t offset)
+{
+    uint8_t cmd[3] = {0xb0 + page, offset & 0x0f, 0x10 + (offset >> 4)};
+    lcd_write_commands(disp, cmd, 3);
+}
+
+/**
+ * @brief 设置SH1108的页地址
+ * 
+ * @param disp 
+ * @param page 
+ * @param offset 
+ */
+static inline void lcd_set_page_address_sh1108_compatible(const void *disp, const uint16_t page, uint16_t offset)
+{
+    uint8_t cmd[4] = {0xb0,  page, offset & 0x0f, 0x10 + (offset >> 4)};
+    lcd_write_commands(disp, cmd, 4);
+}
+
+
 #ifdef __cplusplus
 }
 #endif

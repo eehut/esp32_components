@@ -17,7 +17,7 @@ extern "C" {
  */
 
 #include "lcd_driver.h"
-#include "lcd_models.h"
+#include "lcd_model_type.h"
 #include "lcd_fonts.h"
 #include "lcd_img.h"
 #include <string.h>
