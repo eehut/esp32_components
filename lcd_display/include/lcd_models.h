@@ -100,13 +100,16 @@ static inline void _custom_refresh_for_sh1122(const void *disp, const lcd_model_
 
 /// 预定义的MODEL
 #define LCD_DEFINE_SSD1306_128X64(_name) \
-LCD_MODEL_DEFINE(LCD_SSD1306_128X64, _name, 128, 64, SSD1306_INIT_DATAS, LCD_DRAM_MODE_VERTICAL, _set_page_address_ssd1306)
+LCD_MODEL_DEFINE(_name, 128, 64, SSD1306_INIT_DATAS, LCD_DRAM_MODE_VERTICAL, _set_page_address_ssd1306)
 
 
 /*
     FOR SSD1312
     0xAE,           #display off
-    0x20, 0x10,     #Set Memory Addressing Mode #00,Horizontal Addressing Mode;01,Vertical Addressing Mode;10,Page Addressing Mode (RESET);11,Invalid        
+    0x20, 0x09,     #Set Memory Addressing Mode 【A3 * A1 A0】
+                    # 0b 01b - COM-Page H-Mode,
+                    # 0b 10b - Page Addressing Mode(RESET),
+                    # 1b 01b - SEG-Page H-Mode        
     0xC0,           #Set COM Output Scan Direction, C0H - normal mode, C8H - inverted mode
     0x40,           #--set start line address
     0x81, 0x7F,     #--set contrast control register, 0x00~0xff
@@ -149,7 +152,7 @@ LCD_MODEL_DEFINE(LCD_SSD1306_128X64, _name, 128, 64, SSD1306_INIT_DATAS, LCD_DRA
     取CMD0的低4位， 取CMD1的低3位， 拼接成一个列地址：0-127    
 */
 #define SSD1312_INIT_DATAS { \
-0xAE, 0x20, 0x10, 0xC0, 0x40, 0x81, 0x7F, 0xA1, \
+0xAE, 0x00, 0x10, 0x20, 0x02, 0xC0, 0x40, 0x81, 0x7F, 0xA1, \
 0xA6, 0xA8, 0x3F, 0xA4, 0xD3, 0x00, 0xD5, 0xF0, \
 0xD9, 0x22, 0xDA, 0x10, 0xDB, 0x20, 0x8D, 0x12, \
 0xAF \
@@ -217,7 +220,7 @@ LCD_MODEL_DEFINE(_name, 128, 64, SSD1312_INIT_DATAS, LCD_DRAM_MODE_VERTICAL, _se
 
 
 #define LCD_DEFINE_SH1108_160X128(_name) \
-LCD_MODEL_DEFINE(LCD_SH1108_160X128, _name, 128, 160, SH1108_INIT_DATAS, LCD_DRAM_MODE_VERTICAL, _set_page_address_sh1108)
+LCD_MODEL_DEFINE(_name, 128, 160, SH1108_INIT_DATAS, LCD_DRAM_MODE_VERTICAL, _set_page_address_sh1108)
 
 
 /*
