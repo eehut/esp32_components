@@ -188,6 +188,17 @@ static inline int lcd_clear_area(lcd_handle_t disp, int x, int y, int width, int
     return lcd_fill_area(disp, x, y, width, height, 0);
 }
 
+/**
+ * @brief 随机填充指定区域的显示内容
+ * 
+ * @param disp LCD显示句柄
+ * @param x 起始x坐标
+ * @param y 起始y坐标
+ * @param width 要填充的宽度(像素)
+ * @param height 要填充的高度(像素)
+ * @return int 成功返回0，失败返回-1
+ */
+ int lcd_fill_area_random(lcd_handle_t disp, int x, int y, int width, int height);
 
 /**
  * @brief 绘制垂直线

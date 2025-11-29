@@ -48,6 +48,16 @@ extern "C" {
 #define CONFIG_LCD_FONT_CONSOLE_NUMBER_32X48 0
 #endif
 
+/// 默认不启用segment_number_32x48字体
+#ifndef CONFIG_LCD_FONT_SEGMENT_NUMBER_32X48
+#define CONFIG_LCD_FONT_SEGMENT_NUMBER_32X48 0
+#endif
+
+/// 默认不启用segment_number_24x32字体
+#ifndef CONFIG_LCD_FONT_SEGMENT_NUMBER_24X32
+#define CONFIG_LCD_FONT_SEGMENT_NUMBER_24X32 0
+#endif
+
 /// 默认不启用HZK字体16
 #ifndef CONFIG_LCD_FONT_HZK_16
 #define CONFIG_LCD_FONT_HZK_16 0
@@ -79,6 +89,12 @@ LCD_FONT_DECLARE(acorn_ascii_8x8);
 
 /// 大号的数字 32*48 
 LCD_FONT_DECLARE(console_number_32x48);
+
+/// 大号的数字 32*48 
+LCD_FONT_DECLARE(segment_number_32x48);
+
+/// 大号的数字 24*32 
+LCD_FONT_DECLARE(segment_number_24x32); 
 
 /// HZK字体16*16
 LCD_FONT_DECLARE(hzk16);

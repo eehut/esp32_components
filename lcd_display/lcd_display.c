@@ -16,6 +16,7 @@
 #include "lcd_img.h"
 #include "lcd_model_type.h"
 #include "uptime.h"
+#include "esp_random.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -1254,6 +1255,61 @@ int lcd_fill_area(lcd_handle_t disp, int x, int y, int width, int height, uint8_
             _set_dram_bits(lcd, x + byte_index * 8, y + h, value ? 0xff : 0x00, fbits, false);
             left_bits -= fbits;
             byte_index++;
+        }
+    }
+
+    return 0;
+}
+
+/**
+ * @brief 随机填充指定区域的显示内容
+ * 
+ * @param disp LCD显示句柄
+ * @param x 起始x坐标
+ * @param y 起始y坐标
+ * @param width 要填充的宽度(像素)
+ * @param height 要填充的高度(像素)
+ * @return int 成功返回0，失败返回-1
+ */
+int lcd_fill_area_random(lcd_handle_t disp, int x, int y, int width, int height)
+{
+    lcd_display_t *lcd = (lcd_display_t *)disp;    
+    
+    // 参数检查
+    if (!lcd || width <= 0 || height <= 0) {
+        return -1;
+    }
+
+    // 检查是否超出屏幕范围
+    if (x >= lcd->xsize || y >= lcd->ysize) {
+        return -1;
+    }
+
+    // 调整宽度和高度，确保不超出屏幕
+    if (x + width > lcd->xsize) {
+        width = lcd->xsize - x;
+    }
+    if (y + height > lcd->ysize) {
+        height = lcd->ysize - y;
+    }
+
+    // 逐像素随机填充
+    for (int h = 0; h < height; h++) {
+        for (int w = 0; w < width; w++) {
+            // 生成随机位值（0或1）
+            bool bit_value = (esp_random() & 0x01) != 0;
+            
+            // 计算像素在显存中的位置
+            int offs = (y + h) * lcd->xsize + (x + w);
+            int byte_index = offs >> 3;
+            int bit_index = 7 - (offs & 0x07);  // 高位在左
+            
+            // 设置位值
+            if (bit_value) {
+                lcd->dram[byte_index] |= (1 << bit_index);
+            } else {
+                lcd->dram[byte_index] &= ~(1 << bit_index);
+            }
         }
     }
 

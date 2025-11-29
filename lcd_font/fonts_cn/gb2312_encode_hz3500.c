@@ -3,7 +3,6 @@
 #include <stdint.h>
 #include "gb2312_encode.h"
 
-#define MAP_TABLE_SIZE 3753
 
 typedef struct {
     uint16_t unicode;  // Unicode code point
@@ -674,6 +673,7 @@ static const code_map_t map_table[] = {
     {0x5728, 0xD4DA}, // 在
     {0x572D, 0xB9E7}, // 圭
     {0x5730, 0xB5D8}, // 地
+    {0x5733, 0xDBDA}, // 圳
     {0x573A, 0xB3A1}, // 场
     {0x573E, 0xBBF8}, // 圾
     {0x5740, 0xD6B7}, // 址
@@ -3769,7 +3769,7 @@ static const code_map_t map_table[] = {
 // Binary search implementation for Unicode to GB2312 conversion
 uint16_t unicode_to_gb2312(uint16_t unicode) {
     int left = 0;
-    int right = MAP_TABLE_SIZE - 1;
+    int right = (sizeof(map_table) / sizeof(map_table[0])) - 1;
     
     while (left <= right) {
         int mid = (left + right) / 2;

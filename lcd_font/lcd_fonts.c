@@ -119,6 +119,15 @@ const uint8_t *lcd_font_get_ascii_number_code(const void *self, uint32_t ch)
 #include "fonts/font_console_number_32x48.c"
 #endif // CONFIG_LCD_FONT_CONSOLE_NUMBER_32X48
 
+#if CONFIG_LCD_FONT_SEGMENT_NUMBER_32X48
+#include "fonts/font_segment_number_32x48.c"
+#endif // CONFIG_LCD_FONT_SEGMENT_NUMBER_32X48
+
+#if CONFIG_LCD_FONT_SEGMENT_NUMBER_24X32
+#include "fonts/font_segment_number_24x32.c"
+#endif // CONFIG_LCD_FONT_SEGMENT_NUMBER_24X32  
+
+
 #if CONFIG_LCD_FONT_HZK_16 || CONFIG_LCD_FONT_HZK_24
 #include "fonts_cn/font_hzk.c"
 #else 
