@@ -36,10 +36,44 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
+#endif
+
 static const char *TAG = "qweather";
 
 // 定义事件基础
 ESP_EVENT_DEFINE_BASE(QWEATHER_EVENTS);
+
+// 内部位置信息结构体（不对外暴露）
+typedef struct {
+    bool valid;                     ///< 是否有效
+    int status_code;                ///< 状态码：200表示成功
+    char name[QWEATHER_TEXT_MAX_LEN];           ///< 地区名称（如：南山）
+    char id[16];                    ///< 地区ID（如：101280604）
+    char adm1[QWEATHER_TEXT_MAX_LEN];           ///< 一级行政区（如：广东省）
+    char adm2[QWEATHER_TEXT_MAX_LEN];           ///< 二级行政区（如：深圳）
+    char country[QWEATHER_TEXT_MAX_LEN];        ///< 国家（如：中国）
+    float lat;                      ///< 纬度
+    float lon;                      ///< 经度
+    char type[16];                  ///< 地区类型（如：city）
+} qweather_location_t;
+
+// 位置名称缓存条目
+typedef struct {
+    uint32_t code;         ///< 地区代码
+    char name[QWEATHER_LOCATION_NAME_MAX_LEN];  ///< 位置名称
+    bool valid;                     ///< 是否有效
+} location_cache_entry_t;
+
+// 位置名称缓存
+typedef struct {
+    location_cache_entry_t entries[CONFIG_QWEATHER_LOCATION_CACHE_SIZE];
+    size_t count;                   ///< 当前缓存条目数量
+    SemaphoreHandle_t mutex;        ///< 缓存访问互斥锁
+} location_cache_t;
+
+static location_cache_t s_location_cache = {0};
 
 // 用于在事件处理中访问JWT token（线程安全：每次请求时设置，请求完成后清除）
 static char s_jwt_token_buffer[512] = {0};
@@ -156,6 +190,21 @@ esp_err_t qweather_init(const char *project_id, const char *key_id, const char *
             vSemaphoreDelete(s_ctx.jwt_mutex);
             s_ctx.config_mutex = NULL;
             s_ctx.jwt_mutex = NULL;
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    
+    // 创建位置缓存互斥锁
+    if (s_location_cache.mutex == NULL) {
+        s_location_cache.mutex = xSemaphoreCreateMutex();
+        if (s_location_cache.mutex == NULL) {
+            ESP_LOGE(TAG, "Failed to create location cache mutex");
+            vSemaphoreDelete(s_ctx.config_mutex);
+            vSemaphoreDelete(s_ctx.jwt_mutex);
+            vSemaphoreDelete(s_ctx.query_mutex);
+            s_ctx.config_mutex = NULL;
+            s_ctx.jwt_mutex = NULL;
+            s_ctx.query_mutex = NULL;
             return ESP_ERR_NO_MEM;
         }
     }
@@ -821,6 +870,185 @@ static esp_err_t http_get_weather(uint32_t location_code, char *response_buffer,
 }
 
 /**
+ * @brief 执行HTTP请求获取位置信息
+ */
+static esp_err_t http_get_location(const char *location_query, char *response_buffer, 
+                                   size_t response_buffer_size, int *http_status_code)
+{
+    // 检查是否已初始化
+    if (!s_ctx.initialized) {
+        ESP_LOGE(TAG, "QWeather not initialized");
+        *http_status_code = QWEATHER_ERR_CONFIG_INVALID;
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    if (location_query == NULL || response_buffer == NULL || http_status_code == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    // 获取配置
+    if (xSemaphoreTake(s_ctx.config_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    
+    if (!validate_config(s_ctx.project_id, s_ctx.key_id, s_ctx.api_host, s_ctx.private_key)) {
+        xSemaphoreGive(s_ctx.config_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // 保存配置指针（在释放互斥锁前）
+    const char *api_host = s_ctx.api_host;
+    xSemaphoreGive(s_ctx.config_mutex);
+    
+    // 生成JWT token
+    char jwt_token[512];
+    esp_err_t ret = generate_jwt_token(jwt_token, sizeof(jwt_token), false);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to generate JWT token");
+        return ret;
+    }
+    
+    // 构建URL（城市查询API）
+    char url[256];
+    snprintf(url, sizeof(url), "%s/geo/v2/city/lookup?location=%s", 
+             api_host, location_query);
+    
+    ESP_LOGD(TAG, "Location lookup URL: %s", url);
+    ESP_LOGD(TAG, "JWT Token (first 50 chars): %.50s", jwt_token);
+    
+    // 保存JWT token供事件处理使用（复制到静态缓冲区）
+    strncpy(s_jwt_token_buffer, jwt_token, sizeof(s_jwt_token_buffer) - 1);
+    s_jwt_token_buffer[sizeof(s_jwt_token_buffer) - 1] = '\0';
+    
+    // 配置HTTP客户端
+    esp_http_client_config_t http_config = {
+        .url = url,
+        .event_handler = http_event_handler,
+        .timeout_ms = 10000,
+        .skip_cert_common_name_check = false,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+    };
+    
+    esp_http_client_handle_t client = esp_http_client_init(&http_config);
+    if (client == NULL) {
+        ESP_LOGE(TAG, "Failed to initialize HTTP client");
+        s_jwt_token_buffer[0] = '\0';
+        return ESP_ERR_NO_MEM;
+    }
+    
+    // 设置请求方法
+    esp_http_client_set_method(client, HTTP_METHOD_GET);
+    
+    // 设置Authorization头：Bearer <token>
+    char auth_header[576];
+    snprintf(auth_header, sizeof(auth_header), "Bearer %s", jwt_token);
+    esp_err_t header_ret = esp_http_client_set_header(client, "Authorization", auth_header);
+    if (header_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set Authorization header: %s", esp_err_to_name(header_ret));
+        esp_http_client_cleanup(client);
+        s_jwt_token_buffer[0] = '\0';
+        return header_ret;
+    }
+    
+    // 设置Accept头
+    header_ret = esp_http_client_set_header(client, "Accept", "application/json");
+    if (header_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set Accept header: %s", esp_err_to_name(header_ret));
+        esp_http_client_cleanup(client);
+        s_jwt_token_buffer[0] = '\0';
+        return header_ret;
+    }
+    
+    // 初始化响应数据收集上下文
+    s_http_response_ctx.buffer = response_buffer;
+    s_http_response_ctx.buffer_size = response_buffer_size;
+    s_http_response_ctx.data_len = 0;
+    s_http_response_ctx.collecting = true;
+    s_http_response_ctx.is_gzip = false;
+    response_buffer[0] = '\0';
+    
+    // 执行请求
+    ret = esp_http_client_perform(client);
+    
+    // 停止收集数据
+    s_http_response_ctx.collecting = false;
+    
+    if (ret == ESP_OK) {
+        *http_status_code = esp_http_client_get_status_code(client);
+        int64_t content_length = esp_http_client_get_content_length(client);
+        ESP_LOGI(TAG, "HTTP GET Status = %d, content_length = %lld, collected = %zu",
+                *http_status_code, content_length, s_http_response_ctx.data_len);
+        
+        // 如果响应是gzip压缩的，需要解压
+        if (s_http_response_ctx.is_gzip || 
+            (s_http_response_ctx.data_len >= 2 && 
+             response_buffer[0] == 0x1f && response_buffer[1] == 0x8b)) {
+            ESP_LOGI(TAG, "Decompressing gzip response (compressed size: %zu)", s_http_response_ctx.data_len);
+            
+            unsigned char *compressed_data = (unsigned char *)malloc(s_http_response_ctx.data_len);
+            if (compressed_data == NULL) {
+                ESP_LOGE(TAG, "Failed to allocate memory for compressed data");
+                ret = ESP_ERR_NO_MEM;
+            } else {
+                memcpy(compressed_data, response_buffer, s_http_response_ctx.data_len);
+                size_t compressed_len = s_http_response_ctx.data_len;
+                
+                size_t decompressed_len = response_buffer_size - 1;
+                esp_err_t decompress_ret = decompress_gzip(compressed_data, compressed_len,
+                                                          (unsigned char *)response_buffer, 
+                                                          &decompressed_len);
+                free(compressed_data);
+                
+                if (decompress_ret != ESP_OK) {
+                    ESP_LOGE(TAG, "Failed to decompress gzip data: %s", esp_err_to_name(decompress_ret));
+                    ret = ESP_ERR_INVALID_RESPONSE;
+                } else {
+                    s_http_response_ctx.data_len = decompressed_len;
+                    ESP_LOGI(TAG, "Gzip decompression successful (decompressed size: %zu)", decompressed_len);
+                }
+            }
+        }
+        
+        // 确保字符串以null结尾
+        if (s_http_response_ctx.data_len < s_http_response_ctx.buffer_size) {
+            response_buffer[s_http_response_ctx.data_len] = '\0';
+        } else {
+            response_buffer[s_http_response_ctx.buffer_size - 1] = '\0';
+        }
+        
+        // 调试：打印响应体的前200个字符
+        if (s_http_response_ctx.data_len > 0) {
+            size_t print_len = s_http_response_ctx.data_len < 200 ? s_http_response_ctx.data_len : 200;
+            ESP_LOGD(TAG, "Location response body (len=%zu, first %zu chars): %.*s", 
+                    s_http_response_ctx.data_len, print_len, (int)print_len, response_buffer);
+        } else {
+            ESP_LOGD(TAG, "Response body is empty");
+        }
+        
+        if (*http_status_code == 200) {
+            if (s_http_response_ctx.data_len == 0) {
+                ESP_LOGE(TAG, "Empty response body");
+                ret = ESP_ERR_INVALID_RESPONSE;
+            }
+        } else {
+            ESP_LOGE(TAG, "HTTP error status: %d, response: %s", 
+                    *http_status_code, response_buffer);
+            ret = ESP_FAIL;
+        }
+    } else {
+        ESP_LOGE(TAG, "HTTP GET request failed: %s", esp_err_to_name(ret));
+        *http_status_code = QWEATHER_ERR_NETWORK_ERROR;
+    }
+    
+    // 清理
+    s_jwt_token_buffer[0] = '\0';
+    s_http_response_ctx.buffer = NULL;
+    s_http_response_ctx.data_len = 0;
+    esp_http_client_cleanup(client);
+    return ret;
+}
+
+/**
  * @brief 解析JSON响应并填充天气信息
  */
 static esp_err_t parse_weather_json(const char *json_str, uint32_t location_code, 
@@ -923,6 +1151,285 @@ static esp_err_t parse_weather_json(const char *json_str, uint32_t location_code
 }
 
 /**
+ * @brief 解析位置查询JSON响应并填充位置信息
+ */
+static esp_err_t parse_location_json(const char *json_str, qweather_location_t *location)
+{
+    if (json_str == NULL || location == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    // 初始化location结构
+    memset(location, 0, sizeof(qweather_location_t));
+    location->valid = false;
+    
+    // 解析JSON
+    cJSON *json = cJSON_Parse(json_str);
+    if (json == NULL) {
+        const char *error_ptr = cJSON_GetErrorPtr();
+        if (error_ptr != NULL) {
+            ESP_LOGE(TAG, "JSON parse error before: %s", error_ptr);
+        }
+        location->status_code = QWEATHER_ERR_JSON_PARSE;
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    
+    // 检查code字段
+    cJSON *code_item = cJSON_GetObjectItem(json, "code");
+    if (code_item == NULL || !cJSON_IsString(code_item)) {
+        ESP_LOGE(TAG, "Missing or invalid 'code' field");
+        cJSON_Delete(json);
+        location->status_code = QWEATHER_ERR_JSON_PARSE;
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    
+    const char *code_str = cJSON_GetStringValue(code_item);
+    int code = atoi(code_str);
+    location->status_code = code;
+    
+    if (code != 200) {
+        cJSON *message_item = cJSON_GetObjectItem(json, "message");
+        if (message_item != NULL && cJSON_IsString(message_item)) {
+            ESP_LOGE(TAG, "API error: %s", cJSON_GetStringValue(message_item));
+        }
+        cJSON_Delete(json);
+        return ESP_FAIL;
+    }
+    
+    // 解析location数组
+    cJSON *location_array = cJSON_GetObjectItem(json, "location");
+    if (location_array == NULL || !cJSON_IsArray(location_array)) {
+        ESP_LOGE(TAG, "Missing or invalid 'location' field");
+        cJSON_Delete(json);
+        location->status_code = QWEATHER_ERR_JSON_PARSE;
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    
+    // 获取第一个位置（如果有多个结果，只取第一个）
+    int array_size = cJSON_GetArraySize(location_array);
+    if (array_size == 0) {
+        ESP_LOGW(TAG, "No location found");
+        cJSON_Delete(json);
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    cJSON *loc_item = cJSON_GetArrayItem(location_array, 0);
+    if (loc_item == NULL || !cJSON_IsObject(loc_item)) {
+        ESP_LOGE(TAG, "Invalid location item");
+        cJSON_Delete(json);
+        location->status_code = QWEATHER_ERR_JSON_PARSE;
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    
+    // 解析name字段
+    cJSON *name_item = cJSON_GetObjectItem(loc_item, "name");
+    if (name_item != NULL && cJSON_IsString(name_item)) {
+        const char *name = cJSON_GetStringValue(name_item);
+        strncpy(location->name, name, sizeof(location->name) - 1);
+        location->name[sizeof(location->name) - 1] = '\0';
+    }
+    
+    // 解析id字段
+    cJSON *id_item = cJSON_GetObjectItem(loc_item, "id");
+    if (id_item != NULL && cJSON_IsString(id_item)) {
+        const char *id = cJSON_GetStringValue(id_item);
+        strncpy(location->id, id, sizeof(location->id) - 1);
+        location->id[sizeof(location->id) - 1] = '\0';
+    }
+    
+    // 解析adm2字段（二级行政区，如：深圳）
+    cJSON *adm2_item = cJSON_GetObjectItem(loc_item, "adm2");
+    if (adm2_item != NULL && cJSON_IsString(adm2_item)) {
+        const char *adm2 = cJSON_GetStringValue(adm2_item);
+        strncpy(location->adm2, adm2, sizeof(location->adm2) - 1);
+        location->adm2[sizeof(location->adm2) - 1] = '\0';
+    }
+    
+    // 解析adm1字段（一级行政区，如：广东省）
+    cJSON *adm1_item = cJSON_GetObjectItem(loc_item, "adm1");
+    if (adm1_item != NULL && cJSON_IsString(adm1_item)) {
+        const char *adm1 = cJSON_GetStringValue(adm1_item);
+        strncpy(location->adm1, adm1, sizeof(location->adm1) - 1);
+        location->adm1[sizeof(location->adm1) - 1] = '\0';
+    }
+    
+    // 解析country字段
+    cJSON *country_item = cJSON_GetObjectItem(loc_item, "country");
+    if (country_item != NULL && cJSON_IsString(country_item)) {
+        const char *country = cJSON_GetStringValue(country_item);
+        strncpy(location->country, country, sizeof(location->country) - 1);
+        location->country[sizeof(location->country) - 1] = '\0';
+    }
+    
+    // 解析lat和lon字段
+    cJSON *lat_item = cJSON_GetObjectItem(loc_item, "lat");
+    if (lat_item != NULL && cJSON_IsString(lat_item)) {
+        location->lat = atof(cJSON_GetStringValue(lat_item));
+    }
+    
+    cJSON *lon_item = cJSON_GetObjectItem(loc_item, "lon");
+    if (lon_item != NULL && cJSON_IsString(lon_item)) {
+        location->lon = atof(cJSON_GetStringValue(lon_item));
+    }
+    
+    // 解析type字段
+    cJSON *type_item = cJSON_GetObjectItem(loc_item, "type");
+    if (type_item != NULL && cJSON_IsString(type_item)) {
+        const char *type = cJSON_GetStringValue(type_item);
+        strncpy(location->type, type, sizeof(location->type) - 1);
+        location->type[sizeof(location->type) - 1] = '\0';
+    }
+        
+    location->valid = true;
+    cJSON_Delete(json);
+    
+    ESP_LOGI(TAG, "Location parsed: %s (ID: %s)", location->name, location->id);
+    
+    return ESP_OK;
+}
+
+/**
+ * @brief 从缓存中查找位置名称
+ * @return true 找到，false 未找到
+ */
+static bool location_cache_get(uint32_t location_code, char *location_name, size_t name_size)
+{
+    if (location_name == NULL || name_size == 0) {
+        return false;
+    }
+    
+    bool found = false;
+    
+    if (xSemaphoreTake(s_location_cache.mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        for (size_t i = 0; i < s_location_cache.count; i++) {
+            if (s_location_cache.entries[i].valid && 
+                s_location_cache.entries[i].code == location_code) {
+                strncpy(location_name, s_location_cache.entries[i].name, name_size - 1);
+                location_name[name_size - 1] = '\0';
+                found = true;
+                ESP_LOGD(TAG, "Location cache hit: %lu -> %s", 
+                        (unsigned long)location_code, location_name);
+                break;
+            }
+        }
+        xSemaphoreGive(s_location_cache.mutex);
+    }
+    
+    return found;
+}
+
+/**
+ * @brief 将位置名称添加到缓存
+ * @return ESP_OK 成功，ESP_ERR_NO_MEM 缓存已满
+ */
+static esp_err_t location_cache_add(uint32_t location_code, const char *location_name)
+{
+    if (location_name == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    esp_err_t ret = ESP_OK;
+    
+    if (xSemaphoreTake(s_location_cache.mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        // 检查是否已存在
+        bool exists = false;
+        for (size_t i = 0; i < s_location_cache.count; i++) {
+            if (s_location_cache.entries[i].valid && 
+                s_location_cache.entries[i].code == location_code) {
+                // 更新现有条目
+                strncpy(s_location_cache.entries[i].name, location_name,
+                       sizeof(s_location_cache.entries[i].name) - 1);
+                s_location_cache.entries[i].name[
+                    sizeof(s_location_cache.entries[i].name) - 1] = '\0';
+                exists = true;
+                ESP_LOGD(TAG, "Location cache updated: %lu -> %s", 
+                        (unsigned long)location_code, location_name);
+                break;
+            }
+        }
+        
+        // 如果不存在，添加新条目
+        if (!exists) {
+            if (s_location_cache.count < ARRAY_SIZE(s_location_cache.entries)) {
+                s_location_cache.entries[s_location_cache.count].code = location_code;
+                strncpy(s_location_cache.entries[s_location_cache.count].name,
+                       location_name,
+                       sizeof(s_location_cache.entries[s_location_cache.count].name) - 1);
+                s_location_cache.entries[s_location_cache.count].name[
+                    sizeof(s_location_cache.entries[s_location_cache.count].name) - 1] = '\0';
+                s_location_cache.entries[s_location_cache.count].valid = true;
+                s_location_cache.count++;
+                ESP_LOGI(TAG, "Location cached (%zu/%d): %lu -> %s", 
+                        s_location_cache.count, ARRAY_SIZE(s_location_cache.entries),
+                        (unsigned long)location_code, location_name);
+            } else {
+                ESP_LOGE(TAG, "Location cache full (%d entries), cannot add: %lu -> %s",
+                        ARRAY_SIZE(s_location_cache.entries),
+                        (unsigned long)location_code, location_name);
+                ret = ESP_ERR_NO_MEM;
+            }
+        }
+        
+        xSemaphoreGive(s_location_cache.mutex);
+    } else {
+        ret = ESP_ERR_TIMEOUT;
+    }
+    
+    return ret;
+}
+
+/**
+ * @brief 查询并缓存位置名称（内部函数）
+ */
+static esp_err_t query_and_cache_location(uint32_t location_code, char *location_name, size_t name_size)
+{
+    if (location_name == NULL || name_size == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    // 构建location_id字符串
+    char location_id_str[16];
+    snprintf(location_id_str, sizeof(location_id_str), "%lu", (unsigned long)location_code);
+    
+    // 执行HTTP请求查询位置信息
+    char response_buffer[2048];
+    int http_status_code = 0;
+    esp_err_t ret = http_get_location(location_id_str, response_buffer, 
+                                      sizeof(response_buffer), &http_status_code);
+    
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to query location: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    // 解析JSON响应
+    qweather_location_t location;
+    ret = parse_location_json(response_buffer, &location);
+    
+    if (ret != ESP_OK || !location.valid) {
+        ESP_LOGE(TAG, "Failed to parse location JSON: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // 组合位置名称， 如果adm2为空，则只使用name
+    if (strlen(location.adm2) > 0) {
+        snprintf(location_name, name_size, "%s-%s", location.adm2, location.name);
+    } else {
+        strncpy(location_name, location.name, name_size - 1);
+        location_name[name_size - 1] = '\0';
+    }
+        
+    // 添加到缓存
+    esp_err_t cache_ret = location_cache_add(location_code, location_name);
+    if (cache_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to cache location name: %s", esp_err_to_name(cache_ret));
+        // 即使缓存失败，也返回成功，因为我们已经获取到了位置名称
+    }
+    
+    return ESP_OK;
+}
+
+/**
  * @brief 执行天气查询（内部函数）
  */
 static esp_err_t query_weather_internal(uint32_t location_code, qweather_info_t *info)
@@ -972,6 +1479,25 @@ static esp_err_t query_weather_internal(uint32_t location_code, qweather_info_t 
     ret = parse_weather_json(response_buffer, location_code, info);
     if (ret != ESP_OK && info->status_code == 0) {
         info->status_code = http_status_code;
+    }
+    
+    // 如果天气查询成功，获取位置名称
+    if (ret == ESP_OK && info->valid) {
+        // 先尝试从缓存获取
+        if (!location_cache_get(location_code, info->location_name, 
+                               sizeof(info->location_name))) {
+            // 缓存未命中，查询位置信息
+            ESP_LOGI(TAG, "Location not in cache, querying location name for code: %lu", 
+                    (unsigned long)location_code);
+            esp_err_t loc_ret = query_and_cache_location(location_code, 
+                                                         info->location_name,
+                                                         sizeof(info->location_name));
+            if (loc_ret != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to query location name: %s", esp_err_to_name(loc_ret));
+                // 位置查询失败不影响天气数据的有效性，只是没有城市名
+                strcpy(info->location_name, "N/A");
+            }
+        }
     }
     
     return ret;

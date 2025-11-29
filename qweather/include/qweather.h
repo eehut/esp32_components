@@ -23,6 +23,15 @@ extern "C" {
 #define QWEATHER_API_HOST_MAX_LEN 128
 #define QWEATHER_PRIVATE_KEY_MAX_LEN 512
 #define QWEATHER_TEXT_MAX_LEN 32
+#define QWEATHER_LOCATION_NAME_MAX_LEN 32
+
+/**
+ * @brief 位置名称缓存大小（可配置）
+ * 定义最多可以缓存多少个location_code对应的城市名
+ */
+#ifndef CONFIG_QWEATHER_LOCATION_CACHE_SIZE
+#define CONFIG_QWEATHER_LOCATION_CACHE_SIZE 4
+#endif
 
 /**
  * @brief 和风天气信息结构体
@@ -31,6 +40,7 @@ typedef struct {
     bool valid;                     ///< 是否有效
     int status_code;                ///< 状态码：200表示成功，HTTP状态码或自定义错误码（>=1000）
     uint32_t location_code;         ///< 地区代码
+    char location_name[QWEATHER_LOCATION_NAME_MAX_LEN];  ///< 位置名称（如：深圳 南山）
     float temperature;              ///< 温度（摄氏度）
     float humidity;                 ///< 湿度（百分比）
     char weather_text[QWEATHER_TEXT_MAX_LEN];  ///< 天气文本（如：多云）
@@ -76,6 +86,9 @@ esp_err_t qweather_query_async(uint32_t location_code);
  *         ESP_ERR_INVALID_ARG 参数无效
  *         ESP_ERR_INVALID_STATE 配置无效或未初始化
  *         其他错误码 失败
+ * 
+ * @note 查询成功后，info->location_name 字段会自动填充城市名称（如："深圳 南山"）
+ *       城市名称会被缓存，后续查询同一location_code时无需重复请求
  */
 esp_err_t qweather_query(uint32_t location_code, qweather_info_t *info);
 
