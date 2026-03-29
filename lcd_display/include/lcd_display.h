@@ -71,6 +71,22 @@ void lcd_refresh(lcd_handle_t disp);
 void lcd_startup(lcd_handle_t disp);
 
 /**
+ * @brief 开启显示
+ * 
+ * @param disp 显示句柄
+ * @return int LCD_CMD_OK 成功，其他值失败
+ */
+int lcd_display_on(lcd_handle_t disp);
+
+/**
+ * @brief 关闭显示
+ * 
+ * @param disp 显示句柄
+ * @return int LCD_CMD_OK 成功，其他值失败
+ */
+int lcd_display_off(lcd_handle_t disp);
+
+/**
  * @brief 填充指定的数据 
  * 
  * @param disp 

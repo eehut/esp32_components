@@ -538,6 +538,83 @@ void lcd_startup(lcd_handle_t disp)
 
 
 /**
+ * @brief 默认显示控制函数 (SH1122/SSD1306 兼容)
+ * 发送 0xAE (关闭显示) 或 0xAF (开启显示) 命令
+ * 
+ * @param disp 显示句柄
+ * @param command 命令类型
+ * @param data 附加数据 (未使用)
+ * @param len 数据长度 (未使用)
+ * @return int LCD_CMD_OK 成功，LCD_CMD_NOT_SUPPORTED 不支持的命令
+ */
+static int lcd_default_display_control(const void *disp, uint8_t command, const uint8_t *data, uint16_t len)
+{
+    uint8_t cmd;
+    
+    switch (command) {
+        case LCD_CMD_DISPLAY_ON:
+            cmd = 0xAF;  // Display ON
+            break;
+        case LCD_CMD_DISPLAY_OFF:
+            cmd = 0xAE;  // Display OFF
+            break;
+        default:
+            return LCD_CMD_NOT_SUPPORTED;
+    }
+    
+    lcd_write_commands(disp, &cmd, 1);
+    return LCD_CMD_OK;
+}
+
+/**
+ * @brief 显示控制内部实现
+ * 
+ * @param disp 显示句柄
+ * @param command 命令类型
+ * @param data 附加数据
+ * @param len 数据长度
+ * @return int 
+ */
+static int lcd_display_control_internal(lcd_handle_t disp, uint8_t command, const uint8_t *data, uint16_t len)
+{
+    lcd_display_t *lcd = (lcd_display_t *)disp;
+    
+    if (!lcd || !lcd->model) {
+        return -1;
+    }
+    
+    // 如果模型定义了自定义显示控制函数，使用自定义函数
+    if (lcd->model->display_control) {
+        return lcd->model->display_control(disp, command, data, len);
+    }
+    
+    // 否则使用默认控制 (发送 0xAE/0xAF 命令)
+    return lcd_default_display_control(disp, command, data, len);
+}
+
+/**
+ * @brief 开启显示
+ * 
+ * @param disp 显示句柄
+ * @return int LCD_CMD_OK 成功，其他值失败
+ */
+int lcd_display_on(lcd_handle_t disp)
+{
+    return lcd_display_control_internal(disp, LCD_CMD_DISPLAY_ON, NULL, 0);
+}
+
+/**
+ * @brief 关闭显示
+ * 
+ * @param disp 显示句柄
+ * @return int LCD_CMD_OK 成功，其他值失败
+ */
+int lcd_display_off(lcd_handle_t disp)
+{
+    return lcd_display_control_internal(disp, LCD_CMD_DISPLAY_OFF, NULL, 0);
+}
+
+/**
  * @brief 填充指定的数据 
  * 
  * @param disp 
